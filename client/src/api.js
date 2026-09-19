@@ -29,3 +29,7 @@ export function diffSchemas(oldSchema, newSchema, perspective) {
 export function generateCounterexample(oldSchema, newSchema, perspective, kind, pointer) {
   return request("/api/counterexample", { oldSchema, newSchema, perspective, kind, pointer });
 }
+
+export function scanSamples(oldSchema, newSchema, samples) {
+  return request("/api/scan", { oldSchema, newSchema, samples });
+}

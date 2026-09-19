@@ -6,7 +6,7 @@ const SIDE_LABELS = {
   response: { old: "旧版 Schema（响应被拒绝）", new: "新版 Schema（响应可以输出）" },
 };
 
-function SideResult({ label, result }) {
+export function SideResult({ label, result }) {
   if (!result) return null;
   return (
     <div className={`ce-side ${result.valid ? "ce-side--ok" : "ce-side--err"}`}>

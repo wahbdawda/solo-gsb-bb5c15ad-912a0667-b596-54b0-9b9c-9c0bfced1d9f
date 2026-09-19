@@ -6,6 +6,7 @@ const Ajv2020 = require("ajv/dist/2020").default;
 const { inferSchema } = require("./infer");
 const { compareSchemas, PERSPECTIVES } = require("./diff");
 const { generateCounterexample } = require("./counterexample");
+const { scanSamples } = require("./scan");
 
 function createApp() {
   const app = express();
@@ -95,6 +96,23 @@ function createApp() {
     try {
       const result = generateCounterexample({ oldSchema, newSchema, perspective, kind, pointer });
       res.json(result);
+    } catch (err) {
+      const status = err.status && err.status < 500 ? err.status : 500;
+      res.status(status).json({ error: status === 500 ? "Internal server error" : err.message });
+    }
+  });
+
+  // Scan a historical sample set against BOTH schema versions and classify
+  // each sample (both / baselineOnly / currentOnly / neither).
+  app.post("/api/scan", (req, res) => {
+    const { oldSchema, newSchema, samples } = req.body || {};
+    for (const [name, schema] of [["oldSchema", oldSchema], ["newSchema", newSchema]]) {
+      if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+        return res.status(400).json({ error: `Request body must contain a '${name}' object.` });
+      }
+    }
+    try {
+      res.json(scanSamples({ oldSchema, newSchema, samples }));
     } catch (err) {
       const status = err.status && err.status < 500 ? err.status : 500;
       res.status(status).json({ error: status === 500 ? "Internal server error" : err.message });
