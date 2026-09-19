@@ -6,6 +6,7 @@ const Ajv2020 = require("ajv/dist/2020").default;
 const { inferSchema } = require("./infer");
 const { compareSchemas, PERSPECTIVES } = require("./diff");
 const { generateCounterexample } = require("./counterexample");
+const { scanSamples, MAX_SCAN_SAMPLES } = require("./scan");
 
 function createApp() {
   const app = express();
@@ -95,6 +96,35 @@ function createApp() {
     try {
       const result = generateCounterexample({ oldSchema, newSchema, perspective, kind, pointer });
       res.json(result);
+    } catch (err) {
+      const status = err.status && err.status < 500 ? err.status : 500;
+      res.status(status).json({ error: status === 500 ? "Internal server error" : err.message });
+    }
+  });
+
+  // Scan historical samples against both the baseline and the current
+  // schema, classifying each into both / baselineOnly / currentOnly /
+  // neither. Limited to MAX_SCAN_SAMPLES samples per request.
+  app.post("/api/scan-samples", (req, res) => {
+    const { baselineSchema, currentSchema, samples } = req.body || {};
+    for (const [name, schema] of [
+      ["baselineSchema", baselineSchema],
+      ["currentSchema", currentSchema],
+    ]) {
+      if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+        return res.status(400).json({ error: `Request body must contain a '${name}' object.` });
+      }
+    }
+    if (!Array.isArray(samples)) {
+      return res.status(400).json({ error: "Request body must contain a 'samples' array." });
+    }
+    if (samples.length > MAX_SCAN_SAMPLES) {
+      return res.status(400).json({
+        error: `'samples' is limited to ${MAX_SCAN_SAMPLES} entries per scan (received ${samples.length}).`,
+      });
+    }
+    try {
+      res.json(scanSamples({ baselineSchema, currentSchema, samples }));
     } catch (err) {
       const status = err.status && err.status < 500 ? err.status : 500;
       res.status(status).json({ error: status === 500 ? "Internal server error" : err.message });

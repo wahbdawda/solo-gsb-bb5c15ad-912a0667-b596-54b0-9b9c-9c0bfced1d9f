@@ -241,6 +241,88 @@ test("POST /api/counterexample rejects an invalid schema with 422", async () => 
   assert.match(res.data.error, /Invalid schema/);
 });
 
+test("POST /api/scan-samples classifies samples against both schemas", async () => {
+  const baseline = (await post("/api/infer", { samples: [{ id: 1, name: "a" }] })).data.schema;
+  const current = (
+    await post("/api/infer", { samples: [{ id: 1, name: "a", email: "a@x.com" }] })
+  ).data.schema;
+
+  const res = await post("/api/scan-samples", {
+    baselineSchema: baseline,
+    currentSchema: current,
+    samples: [
+      { id: 2, name: "b", email: "b@x.com" }, // both
+      { id: 3, name: "c" }, // baselineOnly
+      { id: "oops", name: "d" }, // neither
+    ],
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.data.total, 3);
+  assert.deepEqual(res.data.summary, { both: 1, baselineOnly: 1, currentOnly: 0, neither: 1 });
+  assert.deepEqual(
+    res.data.results.map((r) => [r.index, r.category]),
+    [
+      [0, "both"],
+      [1, "baselineOnly"],
+      [2, "neither"],
+    ]
+  );
+  const breaking = res.data.results[1];
+  assert.equal(breaking.baseline.valid, true);
+  assert.deepEqual(breaking.baseline.errors, []);
+  assert.equal(breaking.current.valid, false);
+  assert.equal(breaking.current.errors[0].keyword, "required");
+  assert.equal(breaking.current.errors[0].params.missingProperty, "email");
+});
+
+test("POST /api/scan-samples rejects a non-array samples payload", async () => {
+  const missing = await post("/api/scan-samples", { baselineSchema: {}, currentSchema: {} });
+  assert.equal(missing.status, 400);
+  assert.match(missing.data.error, /samples/);
+
+  const notArray = await post("/api/scan-samples", {
+    baselineSchema: {},
+    currentSchema: {},
+    samples: { id: 1 },
+  });
+  assert.equal(notArray.status, 400);
+  assert.match(notArray.data.error, /'samples' array/);
+});
+
+test("POST /api/scan-samples enforces the 200-sample limit", async () => {
+  const over = await post("/api/scan-samples", {
+    baselineSchema: {},
+    currentSchema: {},
+    samples: Array.from({ length: 201 }, (_, i) => ({ i })),
+  });
+  assert.equal(over.status, 400);
+  assert.match(over.data.error, /200/);
+  assert.match(over.data.error, /201/);
+
+  const atLimit = await post("/api/scan-samples", {
+    baselineSchema: {},
+    currentSchema: {},
+    samples: Array.from({ length: 200 }, (_, i) => ({ i })),
+  });
+  assert.equal(atLimit.status, 200);
+  assert.equal(atLimit.data.total, 200);
+  assert.equal(atLimit.data.summary.both, 200);
+});
+
+test("POST /api/scan-samples validates schemas and reports 422 on invalid ones", async () => {
+  const missing = await post("/api/scan-samples", { currentSchema: {}, samples: [] });
+  assert.equal(missing.status, 400);
+  assert.match(missing.data.error, /baselineSchema/);
+
+  const invalid = await post("/api/scan-samples", {
+    baselineSchema: {},
+    currentSchema: { type: "not-a-type" },
+    samples: [{}],
+  });
+  assert.equal(invalid.status, 422);
+  assert.match(invalid.data.error, /Invalid schema/);
+});
+
 test("malformed JSON body gets a JSON 400", async () => {
   const res = await fetch(`${base}/api/infer`, {
     method: "POST",

@@ -5,6 +5,7 @@
 支持一键复制 Schema、校验新样本并按 **JSON Pointer** 展示错误；
 还可把归纳结果设为基线，对比新旧两版 Schema 的**契约演进**（破坏性/兼容判定），
 为每条破坏性变更加载**反例样本**（递归构造最小 JSON 并用 Ajv 双侧校验），
+用**样本影响扫描**把历史样本集按两版 Schema 的通过情况归类（单次最多 200 条），
 并通过**发布门禁**结合基线/目标 SemVer 给出允许或阻止发布的结论与可复制报告。
 
 技术栈：Node.js · Express · React（Vite）· Ajv（draft 2020-12）
@@ -47,6 +48,10 @@ docker compose up --build
   类型收窄/放宽、数组 `items` 新增/移除。构造后用 Ajv 同时校验两侧，仅在方向确实成立时返回
   样本与双侧错误；若变更被 `enum` 等其他约束抵消而无法构造，则返回明确的不可构造原因。
   展开后可查看格式化样本、双侧校验结论与 Ajv 错误（Pointer/关键字/规则路径/参数），并一键复制样本。
+- **样本影响扫描**：在演进页粘贴一个 JSON 数组作为历史样本集（单次最多 **200** 条），后端用 Ajv
+  分别按基线与当前 Schema 校验每条样本，归类为「两版均通过 / 仅基线通过 / 仅当前通过 / 两版均失败」；
+  结果区展示各类数量与样本索引，「仅基线通过」的样本即为升级后会校验失败的历史流量；展开单条可查看
+  该样本 JSON 与两侧错误的 JSON Pointer、关键字和信息。输入非数组或超过 200 条会返回明确错误。
 - **发布门禁**：在演进页填写基线版本（当前 SemVer）与目标版本（新版 SemVer），门禁复用当前
   `/api/diff` 差异汇总即时给出「允许/阻止发布」结论，展示实际升级类型、触发结论的变更数量与
   原因，并可复制包含版本、视角、汇总与结论的 JSON 报告；切换视角或修改版本号都会即时重算。
@@ -58,7 +63,10 @@ docker compose up --build
 3. 选择视角、按需勾选「仅显示破坏性变更」；可随时「将当前结果设为基线」或「清除基线」。
 4. 在每条**破坏性**变更下点击「生成反例」：展开后查看最小反例样本（可一键复制）与旧/新两版
    Ajv 校验结果；无法构造时会展示具体原因（如该节点的唯一区分取值被 `enum` 等约束禁止）。
-5. 在「发布门禁」卡片填写基线版本与目标版本（SemVer），即时得到放行结论，需要时可复制门禁报告。
+5. 在「样本影响扫描」卡片粘贴历史样本 JSON 数组并点击「开始扫描」：结果按「两版均通过 /
+   仅基线通过 / 仅当前通过 / 两版均失败」分组展示数量与样本索引，点击单条展开该样本及两侧
+   Ajv 错误详情（Pointer/关键字/信息）；输入须为 JSON 数组且单次不超过 200 条。
+6. 在「发布门禁」卡片填写基线版本与目标版本（SemVer），即时得到放行结论，需要时可复制门禁报告。
 
 基线仅保存在当前浏览器会话（`sessionStorage`）：刷新页面仍在，关闭标签页即失效，不会上传到服务器持久化。
 门禁填写的两个版本号同样仅保存在当前浏览器会话。
@@ -116,7 +124,7 @@ npm run dev:client   # 前端 http://localhost:5173（/api 代理到 8080）
 ## 测试
 
 ```bash
-npm test             # node:test，覆盖归纳引擎、契约比较器、反例生成器、HTTP API 与发布门禁（74 项）
+npm test             # node:test，覆盖归纳引擎、契约比较器、反例生成器、样本影响扫描、HTTP API 与发布门禁（86 项）
 ```
 
 ## API
@@ -128,6 +136,7 @@ npm test             # node:test，覆盖归纳引擎、契约比较器、反例
 | POST | `/api/validate` | `{ "schema": {...}, "sample": <any> }` | `{ valid, errors: [{ path, pointer, schemaPath, keyword, message, params }] }` |
 | POST | `/api/diff` | `{ "oldSchema": {...}, "newSchema": {...}, "perspective": "request" \| "response" }` | `{ perspective, changes: [{ pointer, kind, field?, severity, oldRule, newRule, reason }], summary: { breaking, compatible, info } }` |
 | POST | `/api/counterexample` | `{ oldSchema, newSchema, perspective, kind, pointer }` | `{ constructible, sample?, oldResult: { valid, errors }, newResult: { valid, errors }, reason? }` |
+| POST | `/api/scan-samples` | `{ baselineSchema, currentSchema, samples: [...] }`（≤ 200 条） | `{ total, summary: { both, baselineOnly, currentOnly, neither }, results: [{ index, category, baseline: { valid, errors }, current: { valid, errors } }] }` |
 
 示例：
 
@@ -148,6 +157,20 @@ curl -X POST http://localhost:8080/api/counterexample \
 #      "newResult": { "valid": false, "errors": [...] } }
 ```
 
+扫描历史样本集在两版 Schema 下的通过情况（服务运行于 http://localhost:8080）：
+
+```bash
+curl -X POST http://localhost:8080/api/scan-samples \
+  -H 'Content-Type: application/json' \
+  -d '{"baselineSchema":{"type":"object","properties":{"id":{"type":"integer"}},"required":["id"]},"currentSchema":{"type":"object","properties":{"id":{"type":"integer"},"email":{"type":"string"}},"required":["id","email"]},"samples":[{"id":1,"email":"a@x.com"},{"id":2},{"id":"oops"}]}'
+# -> { "total": 3,
+#      "summary": { "both": 1, "baselineOnly": 1, "currentOnly": 0, "neither": 1 },
+#      "results": [
+#        { "index": 0, "category": "both", ... },
+#        { "index": 1, "category": "baselineOnly", ... },
+#        { "index": 2, "category": "neither", ... } ] }
+```
+
 ## 目录结构
 
 ```
@@ -158,7 +181,8 @@ curl -X POST http://localhost:8080/api/counterexample \
 │   ├── infer.js            # 递归归纳引擎（类型并集、required、items 折叠、路径映射）
 │   ├── diff.js             # 契约演进比较器（递归对比属性/required/类型联合/items，按视角定级）
 │   ├── counterexample.js   # 破坏性反例生成器（递归构造最小 JSON + Ajv 双侧校验）
-│   ├── app.js              # Express（/api/infer、/api/validate、/api/diff、/api/counterexample、静态托管）
+│   ├── scan.js             # 样本影响扫描（Ajv 双侧校验历史样本，按通过情况归类，上限 200 条）
+│   ├── app.js              # Express（/api/infer、/api/validate、/api/diff、/api/counterexample、/api/scan-samples、静态托管）
 │   ├── index.js            # 入口：监听 PORT（默认 8080）
 │   └── test/               # node:test 单元与 API 测试
 └── client/
@@ -170,6 +194,7 @@ curl -X POST http://localhost:8080/api/counterexample \
         ├── components/ValidatePanel.jsx # 校验面板，JSON Pointer 错误列表
         ├── components/DiffPanel.jsx     # 契约演进面板：视角切换、破坏性筛选、按 Pointer 分组
         ├── components/CounterexamplePanel.jsx # 反例：样本格式化展示、双侧校验结果、复制按钮
+        ├── components/SampleScanPanel.jsx  # 样本影响扫描：数组输入、四类汇总、按类分组、单侧错误展开
         ├── components/ReleaseGate.jsx   # 发布门禁卡片：版本输入、放行结论、报告复制
         └── components/SampleEditor.jsx  # 样本编辑器（实时 JSON 校验）
 ```

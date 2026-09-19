@@ -27,3 +27,28 @@ export const DEFAULT_VALIDATE_SAMPLE = `{
   "tags": ["user", "vip"],
   "address": { "city": "Hangzhou" }
 }`;
+
+// Preloaded historical sample set for the impact scan on the evolution tab:
+// a mix that lands in different baseline/current pass-fail categories.
+export const DEFAULT_SCAN_SAMPLES = `[
+  {
+    "id": 3,
+    "name": "Carol",
+    "age": 28,
+    "tags": ["user"],
+    "address": { "city": "Hangzhou", "zip": "310000" },
+    "phone": null
+  },
+  {
+    "id": 4,
+    "name": "Dave",
+    "tags": ["vip", 7],
+    "address": { "city": "Suzhou" },
+    "active": false
+  },
+  {
+    "id": "legacy-id",
+    "name": "Eve",
+    "age": "unknown"
+  }
+]`;

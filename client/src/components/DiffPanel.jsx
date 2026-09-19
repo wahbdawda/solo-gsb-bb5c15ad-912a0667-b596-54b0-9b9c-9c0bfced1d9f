@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { diffSchemas } from "../api.js";
 import ReleaseGate from "./ReleaseGate.jsx";
 import CounterexamplePanel from "./CounterexamplePanel.jsx";
+import SampleScanPanel from "./SampleScanPanel.jsx";
 
 const KIND_LABELS = {
   type: "类型联合变化",
@@ -220,6 +221,8 @@ export default function DiffPanel({ baseline, current, onSaveBaseline, onClearBa
               </div>
             </>
           )}
+
+          <SampleScanPanel baselineSchema={baseline.schema} currentSchema={currentSchema} />
         </>
       )}
     </div>
